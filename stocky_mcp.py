@@ -66,8 +66,8 @@ class StockImageProvider(ABC):
         self.session = None
 
     @abstractmethod
-    def search(self, query: str, per_page: int = 20, page: int = 1,
-               **kwargs) -> List[ImageResult]:
+    async def search(self, query: str, per_page: int = 20, page: int = 1,
+                     **kwargs) -> List[ImageResult]:
         """Search for images."""
         pass
 
@@ -109,8 +109,8 @@ class PexelsProvider(StockImageProvider):
         """Async context manager exit."""
         self.session = None
 
-    def search(self, query: str, per_page: int = 20, page: int = 1,
-               **kwargs) -> List[ImageResult]:
+    async def search(self, query: str, per_page: int = 20, page: int = 1,
+                     **kwargs) -> List[ImageResult]:
         """Search Pexels for images."""
         if not self.session:
             raise RuntimeError(
@@ -136,6 +136,9 @@ class PexelsProvider(StockImageProvider):
 
             c.setopt(pycurl.URL, full_url)
             c.setopt(pycurl.WRITEDATA, buffer)
+            
+            # Add User-Agent header to avoid Cloudflare blocking
+            headers["User-Agent"] = "Stocky MCP Server/1.0 (https://github.com/joelio/stocky)"
             header_list = [f"{k}: {v}" for k, v in headers.items()]
             c.setopt(pycurl.HTTPHEADER, header_list)
             c.perform()
@@ -144,6 +147,7 @@ class PexelsProvider(StockImageProvider):
             status_code = c.getinfo(pycurl.HTTP_CODE)
             if status_code != 200:
                 logger.error(f"Pexels API error: HTTP status {status_code}")
+                c.close()
                 return []
 
             c.close()
@@ -151,10 +155,8 @@ class PexelsProvider(StockImageProvider):
             # Parse JSON response
             response_data = buffer.getvalue().decode('utf-8')
             data = json.loads(response_data)
-        except (pycurl.error, json.JSONDecodeError) as e:
-            logger.error(f"Pexels API error: {e}")
-            return []
-
+            
+            # Process results
             results = []
             for photo in data.get("photos", []):
                 # Create attribution URL for Pexels
@@ -177,7 +179,10 @@ class PexelsProvider(StockImageProvider):
                     tags=[photo.get("alt", "").lower()]
                     if photo.get("alt") else []
                 ))
-        except pycurl.error as e:
+            
+            return results
+            
+        except (pycurl.error, json.JSONDecodeError) as e:
             logger.error(f"Pexels API error: {e}")
             return []
             
